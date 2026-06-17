@@ -187,4 +187,7 @@ if __name__ == "__main__":
             print("[INFO] Quit signal received.")
             break
 
+
     cam.release()
+    cam.release()
+
