@@ -1,0 +1,9 @@
+# data_direct.yaml - Points directly to the original dataset
+train: C:\Users\grp98\.cache\kagglehub\datasets\mugheesahmad\sh17-dataset-for-ppe-detection\versions\1\images
+val: C:\Users\grp98\.cache\kagglehub\datasets\mugheesahmad\sh17-dataset-for-ppe-detection\versions\1\images
+
+nc: 17
+names: ['Hard hat', 'Safety vest', 'Gloves', 'Safety glasses', 'Hearing protection', 
+        'High visibility', 'Safety shoes', 'Full body suit', 'Respirator', 'Face shield',
+        'Goggles', 'Welding helmet', 'Earplugs', 'Harness', 'Lanyard', 'Tool lanyard', 
+        'Knee pads']
