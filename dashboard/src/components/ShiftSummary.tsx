@@ -12,7 +12,9 @@ const DUMMY_SHIFT: ShiftRow[] = [
   { operator: "Operator Singh", amberMinutes: 11, redEvents: 1, ppeViolations: 2, status: "Needs Attention" },
 ];
 
-export default function ShiftSummary() {
+export default function ShiftSummary({ rows }: { rows?: ShiftRow[] }) {
+  const display = rows ?? DUMMY_SHIFT;
+
   return (
     <div style={{
       background: "#1e1e2e",
@@ -36,7 +38,7 @@ export default function ShiftSummary() {
           </tr>
         </thead>
         <tbody>
-          {DUMMY_SHIFT.map((row, i) => (
+          {display.map((row, i) => (
             <tr key={i} style={{ borderTop: "1px solid #2d2d3f" }}>
               <td style={{ padding: "10px 12px", color: "#e2e8f0" }}>{row.operator}</td>
               <td style={{ padding: "10px 12px", color: "#f59e0b" }}>{row.amberMinutes}</td>

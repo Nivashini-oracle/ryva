@@ -1,8 +1,15 @@
-type EventEntry = {
+export type EventEntry = {
   id: number;
   type: "AMBER" | "RED" | "PPE VIOLATION" | "SOS";
   operator: string;
   timestamp: string;
+};
+
+const BADGE_COLORS: Record<string, string> = {
+  "AMBER":         "#f59e0b",
+  "RED":           "#ef4444",
+  "PPE VIOLATION": "#ef4444",
+  "SOS":           "#a855f7",
 };
 
 const DUMMY_EVENTS: EventEntry[] = [
@@ -14,14 +21,9 @@ const DUMMY_EVENTS: EventEntry[] = [
   { id: 6, type: "SOS",           operator: "Operator Kumar",  timestamp: "09:01:47" },
 ];
 
-const BADGE_COLORS: Record<string, string> = {
-  "AMBER":         "#f59e0b",
-  "RED":           "#ef4444",
-  "PPE VIOLATION": "#ef4444",
-  "SOS":           "#a855f7",
-};
+export default function EventLog({ events }: { events?: EventEntry[] }) {
+  const display = events && events.length > 0 ? events : DUMMY_EVENTS;
 
-export default function EventLog() {
   return (
     <div style={{
       background: "#1e1e2e",
@@ -35,7 +37,7 @@ export default function EventLog() {
         EVENT LOG
       </h2>
       <div style={{ maxHeight: "200px", overflowY: "auto", display: "flex", flexDirection: "column", gap: "8px" }}>
-        {DUMMY_EVENTS.map(event => (
+        {display.map(event => (
           <div key={event.id} style={{
             display: "flex",
             alignItems: "center",
