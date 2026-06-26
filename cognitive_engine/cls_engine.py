@@ -120,7 +120,7 @@ def compute_cls(ear, head_pitch, blink_rate, movement_var, temp, baseline):
     attention = pitch_dev * 40
 
     # --- Final CLS (0–100) ---
-    score = (fatigue * 0.65 + attention * 0.35) * temp_mult
+    score = (fatigue * 0.95 + attention * 0.55) * temp_mult
     score = min(100, score)
 
     return round(score, 2)
