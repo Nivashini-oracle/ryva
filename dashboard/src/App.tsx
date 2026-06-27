@@ -7,7 +7,7 @@ type State = "GREEN" | "AMBER" | "RED";
 
 export type EventEntry = {
   id: number;
-  type: "AMBER" | "RED" | "PPE VIOLATION" | "SOS";
+  type: "AMBER" | "RED" | "PPE VIOLATION" | "SOS" | "PPE CLEARED" | "GREEN";
   operator: string;
   timestamp: string;
 };
@@ -24,28 +24,66 @@ export default function App() {
   const [operatorId, setOperatorId] = useState("MACHINE-01");
   const [events, setEvents] = useState<EventEntry[]>([]);
   const [connected, setConnected] = useState(false);
+  const [activePPE, setActivePPE] = useState<Set<string>>(new Set());
   const wsRef = useRef<WebSocket | null>(null);
   const counterRef = useRef(0);
 
   useEffect(() => {
     function connect() {
-      const ws = new WebSocket('ws://localhost:8765/ws');
+      const ws = new WebSocket("ws://localhost:8765/ws");
       wsRef.current = ws;
 
       ws.onopen = () => setConnected(true);
 
       ws.onmessage = (e) => {
         const msg = JSON.parse(e.data);
+
         if (msg.type === "cls_update") {
           setCls(msg.cls);
           setState(msg.state);
           setOperatorId(msg.operator_id);
         }
+
         if (msg.type === "event") {
           counterRef.current += 1;
           setEvents(prev => [{
             id: counterRef.current,
             type: msg.event_type,
+            operator: msg.operator_id,
+            timestamp: msg.ts,
+          }, ...prev].slice(0, 100));
+        }
+
+        if (msg.type === "ppe_violation") {
+          counterRef.current += 1;
+          if (msg.cleared) {
+            setActivePPE(prev => {
+              const next = new Set(prev);
+              next.delete(msg.operator_id);
+              return next;
+            });
+            setEvents(prev => [{
+              id: counterRef.current,
+              type: "PPE CLEARED",
+              operator: msg.operator_id,
+              timestamp: msg.ts,
+            }, ...prev].slice(0, 100));
+          } else {
+            setActivePPE(prev => new Set(prev).add(msg.operator_id));
+            setEvents(prev => [{
+              id: counterRef.current,
+              type: "PPE VIOLATION",
+              operator: msg.operator_id,
+              timestamp: msg.ts,
+            }, ...prev].slice(0, 100));
+          }
+        }
+
+        if (msg.type === "sos") {
+          counterRef.current += 1;
+          setEvents(prev => [{
+            id: counterRef.current,
+            type: "SOS",
             operator: msg.operator_id,
             timestamp: msg.ts,
           }, ...prev].slice(0, 100));
@@ -74,7 +112,7 @@ export default function App() {
     }}>
       <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
         <h1 style={{ color: "#e2e8f0", fontFamily: "monospace", fontSize: "18px", letterSpacing: "0.2em" }}>
-          RYVA � SUPERVISOR DASHBOARD
+          RYVA - SUPERVISOR DASHBOARD
         </h1>
         <span style={{
           width: "8px", height: "8px", borderRadius: "50%",
@@ -83,6 +121,25 @@ export default function App() {
           display: "inline-block",
         }} />
       </div>
+
+      {activePPE.size > 0 && (
+        <div style={{
+          background: "#2d0a0a",
+          border: "1px solid #ef4444",
+          borderRadius: "12px",
+          padding: "12px 20px",
+          width: "100%",
+          maxWidth: "600px",
+          display: "flex",
+          alignItems: "center",
+          gap: "12px",
+        }}>
+          <span style={{ color: "#ef4444", fontFamily: "monospace", fontSize: "13px", fontWeight: "700" }}>
+            [!] ACTIVE PPE VIOLATION -- {Array.from(activePPE).join(", ")}
+          </span>
+        </div>
+      )}
+
       <MachineCard operatorId={operatorId} cls={cls} state={state} />
       <EventLog events={events} />
       <ShiftSummary rows={DUMMY_SHIFT} />
