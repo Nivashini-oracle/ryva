@@ -26,7 +26,8 @@ class ConnectionManager:
         print(f"Client connected. Total: {len(self.active_connections)}")
 
     def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
         print(f"Client disconnected. Total: {len(self.active_connections)}")
 
     async def broadcast(self, message: dict):
@@ -37,7 +38,8 @@ class ConnectionManager:
             except:
                 dead.append(connection)
         for d in dead:
-            self.active_connections.remove(d)
+            if d in self.active_connections:
+                self.active_connections.remove(d)
 
 manager = ConnectionManager()
 
@@ -49,7 +51,6 @@ def get_state(cls: float) -> str:
     else:
         return "RED"
 
-# Simulation state
 sim_cls = 30.0
 sim_direction = 1
 
@@ -60,7 +61,6 @@ async def simulation_loop():
     while True:
         await asyncio.sleep(1)
 
-        # Slowly drift CLS up and down
         sim_cls += sim_direction * random.uniform(0.5, 2.0)
         if sim_cls >= 85:
             sim_direction = -1
@@ -71,7 +71,6 @@ async def simulation_loop():
         current_state = get_state(sim_cls)
         ts = datetime.now().strftime("%H:%M:%S")
 
-        # Send CLS update
         await manager.broadcast({
             "type": "cls_update",
             "operator_id": "R001",
@@ -79,7 +78,6 @@ async def simulation_loop():
             "state": current_state,
         })
 
-        # Send event when state changes
         if current_state != last_state:
             await manager.broadcast({
                 "type": "event",
@@ -102,7 +100,9 @@ async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     try:
         while True:
-            await websocket.receive_text()
+            data = await websocket.receive_text()
+            msg = json.loads(data)
+            await manager.broadcast(msg)
     except WebSocketDisconnect:
         manager.disconnect(websocket)
 

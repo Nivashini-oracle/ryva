@@ -6,6 +6,7 @@ interface MachineCardProps {
   operatorId: string;
   cls: number;
   state: State;
+  etaMinutes?: number | null;
 }
 
 const STATE_COLORS: Record<State, string> = {
@@ -14,7 +15,7 @@ const STATE_COLORS: Record<State, string> = {
   RED: "#ef4444",
 };
 
-export default function MachineCard({ operatorId, cls, state }: MachineCardProps) {
+export default function MachineCard({ operatorId, cls, state, etaMinutes }: MachineCardProps) {
   const color = STATE_COLORS[state];
   const data = [{ value: cls }];
 
@@ -86,6 +87,20 @@ export default function MachineCard({ operatorId, cls, state }: MachineCardProps
           </div>
         </div>
       </div>
+
+      {etaMinutes !== null && etaMinutes !== undefined && state !== "RED" && (
+        <div style={{
+          background: "#2d1a00",
+          border: "1px solid #f59e0b",
+          borderRadius: "8px",
+          padding: "6px 12px",
+          textAlign: "center",
+        }}>
+          <span style={{ color: "#f59e0b", fontFamily: "monospace", fontSize: "11px" }}>
+            Projected RED in {etaMinutes} min
+          </span>
+        </div>
+      )}
     </div>
   );
 }
