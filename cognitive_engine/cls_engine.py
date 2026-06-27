@@ -111,16 +111,16 @@ def compute_cls(ear, head_pitch, blink_rate, movement_var, temp, baseline):
     # Cabin above 35°C increases fatigue by 20%
     temp_mult = 1.2 if temp > 35 else 1.0
 
-    # --- Fatigue score (0–60) ---
+    # --- Fatigue score (0–100) ---
     # Weighted: eye openness 45%, blink rate 25%, movement 30%
-    fatigue = (ear_dev * 0.45 + blink_dev * 0.25 + move_dev * 0.30) * 60
+    fatigue = (ear_dev * 0.45 + blink_dev * 0.25 + move_dev * 0.30) * 100
 
-    # --- Attention score (0–40) ---
+    # --- Attention score (0–100) ---
     # Head pitch forward = loss of attention
-    attention = pitch_dev * 40
+    attention = pitch_dev * 100
 
     # --- Final CLS (0–100) ---
-    score = (fatigue * 0.95 + attention * 0.55) * temp_mult
+    score = (fatigue * 0.65 + attention * 0.35) * temp_mult
     score = min(100, score)
 
     return round(score, 2)
@@ -141,8 +141,8 @@ def compute_cls_detailed(ear, head_pitch, blink_rate,
     blink_dev = min(blink_rate / 30, 1)
     move_dev  = min(movement_var / baseline["move_max"], 1)
     temp_mult = 1.2 if temp > 35 else 1.0
-    fatigue   = (ear_dev * 0.45 + blink_dev * 0.25 + move_dev * 0.30) * 60
-    attention = pitch_dev * 40
+    fatigue   = (ear_dev * 0.45 + blink_dev * 0.25 + move_dev * 0.30) * 100
+    attention = pitch_dev * 100
     score     = min(100, (fatigue * 0.65 + attention * 0.35) * temp_mult)
 
     return {
