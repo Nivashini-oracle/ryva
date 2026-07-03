@@ -47,6 +47,8 @@ PAGE_RED = 3
 # WebSocket feed config - must match the operator_id main_loop.py broadcasts as
 WS_URL = "ws://localhost:8765/ws"
 OPERATOR_ID = "R001"
+HYSTERESIS_UP = 10    # seconds a higher state must persist before switching up
+HYSTERESIS_DOWN = 60  # seconds a lower state must persist before switching down
 
 pygame.mixer.init()
 
@@ -176,6 +178,9 @@ class RyvaHMI(QMainWindow):
         self.rest_suggested = False
         self.last_below_threshold_time = None
 
+self.pending_state = None
+self.pending_since = None
+
         self.stack = QStackedWidget()
         self.setCentralWidget(self.stack)
 
@@ -230,32 +235,55 @@ class RyvaHMI(QMainWindow):
 
         self.update_state(cls_score)
 
-    def update_state(self, cls_score):
-        new_state = self.current_state
-
+   def update_state(self, cls_score):
         if cls_score > 71:
-            new_state = "RED"
+            raw_state = "RED"
         elif cls_score > 41:
-            new_state = "AMBER"
+            raw_state = "AMBER"
         else:
-            new_state = "GREEN"
+            raw_state = "GREEN"
 
-        if new_state != self.current_state:
-            print(f"State change: {self.current_state} -> {new_state} (CLS={cls_score})")
-            self.current_state = new_state
+        severity = {"GREEN": 0, "AMBER": 1, "RED": 2}
+        now = time.time()
 
-            if new_state == "AMBER":
-                self.amber_start_time = time.time()
-                self.rest_suggested = False
-                self.stack.setCurrentIndex(PAGE_AMBER)
-                self.play_voice_alert("AMBER")
-            elif new_state == "RED":
-                self.stack.setCurrentIndex(PAGE_RED)
-                self.play_voice_alert("RED")
-            elif new_state == "GREEN":
-                self.amber_start_time = None
-                self.rest_suggested = False
-                self.stack.setCurrentIndex(PAGE_GREEN)
+        if raw_state == self.current_state:
+            # Back to current state before hold time elapsed - cancel pending change
+            self.pending_state = None
+            self.pending_since = None
+        else:
+            if raw_state != self.pending_state:
+                self.pending_state = raw_state
+                self.pending_since = now
+
+            going_up = severity[raw_state] > severity[self.current_state]
+            required_hold = HYSTERESIS_UP if going_up else HYSTERESIS_DOWN
+
+            if now - self.pending_since >= required_hold:
+                new_state = raw_state
+                print(f"State change: {self.current_state} -> {new_state} (CLS={cls_score}, held {required_hold}s)")
+                self.current_state = new_state
+                self.pending_state = None
+                self.pending_since = None
+
+                if new_state == "AMBER":
+                    self.amber_start_time = time.time()
+                    self.rest_suggested = False
+                    self.stack.setCurrentIndex(PAGE_AMBER)
+                    self.play_voice_alert("AMBER")
+                elif new_state == "RED":
+                    self.stack.setCurrentIndex(PAGE_RED)
+                    self.play_voice_alert("RED")
+                elif new_state == "GREEN":
+                    self.amber_start_time = None
+                    self.rest_suggested = False
+                    self.stack.setCurrentIndex(PAGE_GREEN)
+
+        # STEP m-7 (simplified): micro-rest check while in AMBER
+        if self.current_state == "AMBER" and self.amber_start_time:
+            amber_duration = time.time() - self.amber_start_time
+            if amber_duration > 300 and not self.rest_suggested:
+                self.rest_suggested = True
+                self.play_voice_alert("REST")
 
         # STEP m-7 (simplified): micro-rest check while in AMBER
         if self.current_state == "AMBER" and self.amber_start_time:
