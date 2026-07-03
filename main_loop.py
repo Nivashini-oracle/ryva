@@ -206,22 +206,24 @@ def cls_thread():
 
         # Broadcast to WebSocket dashboard
         payload = {
-            "cls_score"    : score,
-            "band"         : band,
-            "ear"          : ear,
-            "head_pitch"   : head_pitch,
-            "blink_rate"   : blink_rate,
-            "gaze"         : gaze,
-            "temp"         : temp,
-            "hum"          : hum,
-            "movement_var" : movement_var,
-            "vib"          : vib,
-            "timestamp"    : time.time()
-        }
+    "type"         : "cls_update",
+    "operator_id"  : "R001",
+    "cls"          : score,
+    "state"        : band,
+    "ear"          : ear,
+    "head_pitch"   : head_pitch,
+    "blink_rate"   : blink_rate,
+    "gaze"         : gaze,
+    "temp"         : temp,
+    "hum"          : hum,
+    "movement_var" : movement_var,
+    "vib"          : vib,
+    "timestamp"    : time.time()
+}
 
         if ws_loop and ws_loop.is_running():
             try:
-                from ws_server import broadcast
+                from wss_server import broadcast
                 asyncio.run_coroutine_threadsafe(broadcast(payload), ws_loop)
             except Exception:
                 pass
