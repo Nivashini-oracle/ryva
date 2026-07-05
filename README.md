@@ -258,9 +258,9 @@ Open an issue first for significant changes.
 
 Built for **Tata InnoVent 2026** by a 4-person team from SASTRA Deemed University, Thanjavur.
 
-**Grismitha** — Supervisor dashboard (React + TypeScript), WebSocket server, real-time CLS visualisation, PPE violation UI, incident report panel, fatigue trajectory prediction, system integration
+**Grismitha** — Supervisor dashboard (React + TypeScript), WebSocket server, real-time CLS visualisation, PPE model training (YOLOv8-nano), PPE violation UI, incident report panel, system integration
 
-**Nivashini** — Face pipeline (MediaPipe), CLS engine, main inference loop, serial biosignal receiver, PPE model training (YOLOv8-nano)
+**Nivashini** — Face pipeline (MediaPipe), CLS engine, main inference loop, serial biosignal receiver, fatigue trajectory prediction
 
 **Ishaa** — Arduino firmware, sensor wiring (MPU6050, DHT22, Buzzer), wristband hardware assembly
 
