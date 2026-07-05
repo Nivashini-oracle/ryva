@@ -9,7 +9,7 @@
 ![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)
 ![Competition](https://img.shields.io/badge/Tata%20InnoVent-2026-orange?style=flat-square)
 
-> Built for **Tata InnoVent 2026** — SASTRA Deemed University, Thanjavur.
+> Built for **Tata InnoVent 2026**
 
 ---
 
