@@ -1,23 +1,35 @@
 # =============================================================
-# RYVA Project — main_loop.py  (updated g-7)
+# RYVA Project — main_loop.py  (updated g-9)
 # Purpose : Links face pipeline + serial receiver + CLS engine
-#           Broadcasts CLS updates to dashboard via WebSocket
+#           Sends CLS updates to the dashboard/HMI over a real
+#           WebSocket CLIENT connection to wss_server.py
 # Author  : RYVA Team
 # Usage   : python main_loop.py
-# NOTE    : Start ws_server.py FIRST before running this
+# NOTE    : Start wss_server.py FIRST (uvicorn wss_server:app --host 0.0.0.0 --port 8765)
 # Done When:
 #   Dashboard gauge updates every second from real Arduino data
 #   Move wrist quickly → movement_var rises → CLS rises
+#
+# FIX (g-9): main_loop.py previously did `from wss_server import
+# broadcast`, which — since main_loop.py and wss_server.py run as
+# separate OS processes — created its own empty in-memory copy of
+# wss_server's `clients` set instead of reaching the real running
+# server. broadcast() ran with zero connected clients, silently.
+# Fixed by making main_loop.py a real WebSocket CLIENT that connects
+# to ws://localhost:8765/ws over the network, same pattern already
+# used successfully in ryva_hmi.py.
 # =============================================================
 
 import cv2
 import time
+import json
 import queue
 import threading
 import collections
-import asyncio
 import sys
 import os
+
+import websocket  # pip install websocket-client
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
@@ -29,8 +41,11 @@ from biosignal.serial_receiver         import serial_receiver
 # CONFIGURATION
 # ==============================================================
 
-CLS_INTERVAL = 1.0
-WINDOW_SIZE  = 25
+CLS_INTERVAL            = 1.0
+WINDOW_SIZE              = 25
+CALIBRATION_SECONDS      = 10   # keep in sync with ryva_hmi.py's CALIBRATION_SECONDS
+MOVE_MAX_SAFETY_MARGIN   = 1.3  # personal move_max = observed max * this margin
+WS_URL                   = "ws://localhost:8765/ws"
 
 # ==============================================================
 # SHARED STATE
@@ -53,7 +68,61 @@ serial_state = {
 serial_lock = threading.Lock()
 
 stop_event = threading.Event()
-ws_loop    = None
+
+# ==============================================================
+# WEBSOCKET CLIENT — real network connection to wss_server.py
+# ==============================================================
+
+_ws_client = None
+_ws_lock   = threading.Lock()
+
+
+def ws_client_thread():
+    """
+    Keeps a persistent WebSocket CLIENT connection open to the real
+    running wss_server.py process. Reconnects automatically if the
+    connection drops.
+
+    IMPORTANT: wss_server.py's broadcast() sends every payload to ALL
+    connected clients - and main_loop.py IS a client (it connects to
+    send). So the server echoes our own data straight back to us every
+    second. If nothing ever reads that incoming data, it piles up in
+    the socket's receive buffer until Windows aborts the connection
+    (WinError 10053). So this loop actively calls .recv() to drain and
+    discard whatever comes back, instead of idling or pinging.
+    """
+    global _ws_client
+    while not stop_event.is_set():
+        try:
+            with _ws_lock:
+                _ws_client = websocket.create_connection(WS_URL, timeout=2)
+            print(f"[WS] main_loop connected to {WS_URL}")
+
+            while not stop_event.is_set():
+                try:
+                    # Drain the server's broadcast echo. timeout=2 means
+                    # this returns every ~2s even with no data, so the
+                    # stop_event check above still runs regularly.
+                    _ws_client.recv()
+                except websocket._exceptions.WebSocketTimeoutException:
+                    continue
+
+        except Exception as e:
+            print(f"[WS] Connection lost/failed ({e}) - retrying in 2s...")
+            with _ws_lock:
+                _ws_client = None
+            time.sleep(2)
+
+
+def ws_send(payload: dict):
+    """Send a payload to wss_server.py over the real WebSocket connection."""
+    with _ws_lock:
+        if _ws_client is None:
+            return
+        try:
+            _ws_client.send(json.dumps(payload))
+        except Exception as e:
+            print(f"[WS] Send failed: {e}")
 
 
 # ==============================================================
@@ -160,6 +229,46 @@ def cls_thread():
 
     band_colors = {"GREEN": "🟢", "AMBER": "🟡", "RED": "🔴"}
 
+    # ----------------------------------------------------------
+    # CALIBRATION PHASE — build a real personal baseline
+    # ----------------------------------------------------------
+    print(f"[CLS] Calibrating — collecting baseline for {CALIBRATION_SECONDS}s. "
+          f"Look at the camera and hold the wristband normally...")
+
+    calib_ear_samples  = []
+    calib_move_samples = []
+    calib_start = time.time()
+
+    while not stop_event.is_set() and (time.time() - calib_start) < CALIBRATION_SECONDS:
+        with face_lock:
+            calib_ear_samples.append(latest_face["ear"])
+        with serial_lock:
+            calib_move_samples.append(serial_state["movement_var"])
+        time.sleep(0.2)
+
+    if calib_ear_samples:
+        personal_ear = sum(calib_ear_samples) / len(calib_ear_samples)
+    else:
+        personal_ear = DEFAULT_BASELINE["ear"]
+
+    if calib_move_samples:
+        personal_move_max = max(calib_move_samples) * MOVE_MAX_SAFETY_MARGIN
+        personal_move_max = max(personal_move_max, DEFAULT_BASELINE["move_max"] * 0.3)
+    else:
+        personal_move_max = DEFAULT_BASELINE["move_max"]
+
+    baseline = {
+        "ear"      : round(personal_ear, 3),
+        "move_max" : round(personal_move_max, 2),
+    }
+
+    print(f"[CLS] Calibration done ✅ — personal baseline: "
+          f"ear={baseline['ear']}, move_max={baseline['move_max']} "
+          f"(from {len(calib_ear_samples)} samples)")
+
+    # ----------------------------------------------------------
+    # MAIN LOOP
+    # ----------------------------------------------------------
     while not stop_event.is_set():
         loop_start = time.time()
 
@@ -187,7 +296,7 @@ def cls_thread():
             blink_rate   = blink_rate,
             movement_var = adjusted_var,
             temp         = temp,
-            baseline     = DEFAULT_BASELINE
+            baseline     = baseline
         )
 
         band  = get_cls_band(score)
@@ -204,45 +313,28 @@ def cls_thread():
             f"{vib_str}"
         )
 
-        # Broadcast to WebSocket dashboard
         payload = {
-    "type"         : "cls_update",
-    "operator_id"  : "R001",
-    "cls"          : score,
-    "state"        : band,
-    "ear"          : ear,
-    "head_pitch"   : head_pitch,
-    "blink_rate"   : blink_rate,
-    "gaze"         : gaze,
-    "temp"         : temp,
-    "hum"          : hum,
-    "movement_var" : movement_var,
-    "vib"          : vib,
-    "timestamp"    : time.time()
-}
+            "type"         : "cls_update",
+            "operator_id"  : "R001",
+            "cls"          : score,
+            "state"        : band,
+            "ear"          : ear,
+            "head_pitch"   : head_pitch,
+            "blink_rate"   : blink_rate,
+            "gaze"         : gaze,
+            "temp"         : temp,
+            "hum"          : hum,
+            "movement_var" : movement_var,
+            "vib"          : vib,
+            "timestamp"    : time.time()
+        }
 
-        if ws_loop and ws_loop.is_running():
-            try:
-                from wss_server import broadcast
-                asyncio.run_coroutine_threadsafe(broadcast(payload), ws_loop)
-            except Exception:
-                pass
+        ws_send(payload)
 
         elapsed    = time.time() - loop_start
         time.sleep(max(0, CLS_INTERVAL - elapsed))
 
     print("[CLS] Thread stopped.")
-
-
-# ==============================================================
-# WEBSOCKET EVENT LOOP THREAD
-# ==============================================================
-
-def ws_event_loop_thread():
-    global ws_loop
-    ws_loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(ws_loop)
-    ws_loop.run_forever()
 
 
 # ==============================================================
@@ -252,17 +344,17 @@ def ws_event_loop_thread():
 if __name__ == "__main__":
 
     print("=" * 65)
-    print("  RYVA — Main Loop (g-7)")
-    print("  Face + Serial + CLS + WebSocket")
+    print("  RYVA — Main Loop (g-9)")
+    print("  Face + Serial + CLS + WebSocket client")
     print("  Press 'q' in camera window to quit")
     print("=" * 65)
     print()
-    print("  NOTE: Run ws_server.py separately first:")
-    print("  uvicorn ws_server:app --host 0.0.0.0 --port 8765")
+    print("  NOTE: Run wss_server.py separately first:")
+    print("  uvicorn wss_server:app --host 0.0.0.0 --port 8765")
     print()
     print("-" * 65)
 
-    t_ws = threading.Thread(target=ws_event_loop_thread, daemon=True)
+    t_ws = threading.Thread(target=ws_client_thread, daemon=True)
     t_ws.start()
     time.sleep(0.5)
 

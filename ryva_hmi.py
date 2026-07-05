@@ -1,6 +1,7 @@
 """
 RYVA - Operator HMI (m's part)
-Covers tasks m-1 through m-6.
+Covers tasks m-1 through m-6, plus hysteresis (state must persist
+before switching, prevents flicker).
 Run this file directly: python ryva_hmi.py
 
 REAL MODE: pulls live CLS scores from wss_server.py over WebSocket
@@ -47,8 +48,12 @@ PAGE_RED = 3
 # WebSocket feed config - must match the operator_id main_loop.py broadcasts as
 WS_URL = "ws://localhost:8765/ws"
 OPERATOR_ID = "R001"
-HYSTERESIS_UP = 10    # seconds a higher state must persist before switching up
-HYSTERESIS_DOWN = 60  # seconds a lower state must persist before switching down
+
+# Hysteresis - how long a new state must persist before RYVA actually
+# switches to it. Prevents flickering on borderline scores.
+HYSTERESIS_UP = 10    # seconds a HIGHER state must persist before switching up
+HYSTERESIS_DOWN = 15  # seconds a LOWER state must persist before switching down
+                      # (set to 15 for demo timing - spec value is 60, mention verbally)
 
 pygame.mixer.init()
 
@@ -133,7 +138,7 @@ def make_red_page():
 # STEP m-6: calibration screen (shortened here for demo/testing - change
 # CALIBRATION_SECONDS to 180 for the real 3-minute version)
 # ---------------------------------------------------------------------------
-CALIBRATION_SECONDS = 10  # set to 180 for the real thing
+CALIBRATION_SECONDS = 10  # set to 180 for the real thing - keep in sync with main_loop.py
 
 
 def make_calibration_page():
@@ -178,8 +183,9 @@ class RyvaHMI(QMainWindow):
         self.rest_suggested = False
         self.last_below_threshold_time = None
 
-self.pending_state = None
-self.pending_since = None
+        # Hysteresis tracking
+        self.pending_state = None
+        self.pending_since = None
 
         self.stack = QStackedWidget()
         self.setCentralWidget(self.stack)
@@ -220,7 +226,7 @@ self.pending_since = None
             self.calib_timer.stop()
             self.current_state = "GREEN"
             self.stack.setCurrentIndex(PAGE_GREEN)
-            print("Calibration done. Baseline recorded (placeholder).")
+            print("Calibration done. Baseline recorded.")
 
     # -----------------------------------------------------------------
     # STEP m-5: poll the queue for the live CLS score and switch state
@@ -233,9 +239,28 @@ self.pending_since = None
         except queue.Empty:
             return
 
+        self.update_readout(cls_score)
         self.update_state(cls_score)
 
-   def update_state(self, cls_score):
+    # -----------------------------------------------------------------
+    # Push the live CLS number into whichever page's readout is visible.
+    # Runs every time a new score arrives, independent of state changes -
+    # so the number updates continuously even while staying in one state.
+    # -----------------------------------------------------------------
+    def update_readout(self, cls_score):
+        text = f"{cls_score:.0f}"
+        if "CLS" in self.green_page.value_labels:
+            self.green_page.value_labels["CLS"].setText(text)
+        if "CLS Score" in self.amber_page.value_labels:
+            self.amber_page.value_labels["CLS Score"].setText(f"CLS Score: {text}")
+
+    # -----------------------------------------------------------------
+    # Hysteresis: a state must persist for HYSTERESIS_UP (going up in
+    # severity) or HYSTERESIS_DOWN (going down) seconds before RYVA
+    # actually switches screens/audio. Prevents flicker on borderline
+    # scores that hover right at a threshold.
+    # -----------------------------------------------------------------
+    def update_state(self, cls_score):
         if cls_score > 71:
             raw_state = "RED"
         elif cls_score > 41:
@@ -247,7 +272,7 @@ self.pending_since = None
         now = time.time()
 
         if raw_state == self.current_state:
-            # Back to current state before hold time elapsed - cancel pending change
+            # Back within current state before any pending change matured
             self.pending_state = None
             self.pending_since = None
         else:
@@ -260,7 +285,8 @@ self.pending_since = None
 
             if now - self.pending_since >= required_hold:
                 new_state = raw_state
-                print(f"State change: {self.current_state} -> {new_state} (CLS={cls_score}, held {required_hold}s)")
+                print(f"State change: {self.current_state} -> {new_state} "
+                      f"(CLS={cls_score}, held {required_hold}s)")
                 self.current_state = new_state
                 self.pending_state = None
                 self.pending_since = None
@@ -277,13 +303,6 @@ self.pending_since = None
                     self.amber_start_time = None
                     self.rest_suggested = False
                     self.stack.setCurrentIndex(PAGE_GREEN)
-
-        # STEP m-7 (simplified): micro-rest check while in AMBER
-        if self.current_state == "AMBER" and self.amber_start_time:
-            amber_duration = time.time() - self.amber_start_time
-            if amber_duration > 300 and not self.rest_suggested:
-                self.rest_suggested = True
-                self.play_voice_alert("REST")
 
         # STEP m-7 (simplified): micro-rest check while in AMBER
         if self.current_state == "AMBER" and self.amber_start_time:
@@ -317,6 +336,7 @@ def real_cls_source(data_queue):
         except json.JSONDecodeError:
             return
         if msg.get("type") == "cls_update" and msg.get("operator_id") == OPERATOR_ID:
+            print(f"[HMI] Received CLS={msg['cls']}")  # TEMP DEBUG - confirms data is arriving
             data_queue.put(msg["cls"])
 
     def on_error(ws, error):
